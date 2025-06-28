@@ -7,6 +7,7 @@
 // It is designed to work with the other example Feather9x_RX
 
 #include "lora.h"
+#include "participants.h"
 #include <SPI.h>
 #include <RH_RF95.h>
 
@@ -99,7 +100,8 @@ uint8_t key[KEY_SIZE] = {
 };
 
 #define IV_SIZE 8
-#define PAYLOAD_SIZE TEXT_BUFFER_SIZE
+#define AUTHOR_SIZE 1
+#define PAYLOAD_SIZE (AUTHOR_SIZE + TEXT_BUFFER_SIZE)
 #define MY_PACKET_SIZE (IV_SIZE + PAYLOAD_SIZE)
 
 void new_iv(uint8_t* buf) {
@@ -202,25 +204,44 @@ uint8_t receive(uint8_t* msg, uint8_t len) {
 
 void send_chat(ChatMessage* msg) {
     size_t msg_len = strlen(msg->message);
+
+    int author_id = get_participant_id(msg->author);
+    uint8_t payload[PAYLOAD_SIZE] = { 0 };
+    payload[0] = author_id;
+    strcpy((char*) payload + AUTHOR_SIZE, msg->message);
+
     uint8_t encrypted[MY_PACKET_SIZE] = { 0 };
-    encrypt(encrypted, (uint8_t*) msg->message, msg_len);
-    Serial.printf("Sending: '%s' '%s' ...", msg->message, encrypted);
-    send(encrypted, msg_len + IV_SIZE + 1);
+    encrypt(encrypted, payload, msg_len + AUTHOR_SIZE);
+    Serial.printf("Sending: %s: '%s' '%s' ...", msg->author, msg->message, encrypted);
+    send(encrypted, IV_SIZE + AUTHOR_SIZE + msg_len + 1);
     Serial.println("Done");
 }
 
 bool receive_chat(ChatMessage* msg) {
   uint8_t encrypted[RH_RF95_MAX_MESSAGE_LEN];
   uint8_t msg_len = receive(encrypted, sizeof(encrypted));
-  if (msg_len > 0) {
-    uint8_t decrypted[RH_RF95_MAX_MESSAGE_LEN] = { 0 };
-    decrypt(decrypted, encrypted, msg_len - 1);
-    Serial.printf("> '%s'\n", (char*) decrypted);
-    memcpy(msg->message, decrypted, msg_len);
-    return true;
+
+  if (msg_len == 0) {
+    return false;
   }
 
-  return false;
+  uint8_t decrypted[RH_RF95_MAX_MESSAGE_LEN] = { 0 };
+  decrypt(decrypted, encrypted, msg_len - 1);
+
+  uint8_t author_id = decrypted[0];
+  const char* author = get_participant_name(author_id);
+
+  if (author == NULL) {
+    Serial.printf("Received message from unknown author_id %d, ignoring\n", author_id);
+    return false;
+  }
+
+  char* message = (char*) decrypted + 1;
+
+  Serial.printf("> %s: '%s'\n", author, (char*) message);
+  strncpy(msg->author, author, sizeof(msg->author) - 1);
+  strncpy(msg->message, message, sizeof(msg->message) - 1);
+  return true;
 }
 
 void lora_loop() {

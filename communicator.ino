@@ -15,6 +15,12 @@
 
 #include "ui.h"
 #include "lora.h"
+#include "participants.h"
+
+#define ENABLE_UI
+#ifdef ENABLE_UI
+
+#define THIS_PARTICIPANT_ID 0
 
 void setup() {
   Serial.begin(115200);
@@ -22,13 +28,13 @@ void setup() {
 
   int8_t transmit_power = 5;
   setup_lora(transmit_power);
-  setup_ui();
+  setup_ui(get_participant_name(THIS_PARTICIPANT_ID));
 }
 
 void loop(void) {
-  ChatMessage msg = {"The Other", { 0 }};
-  bool send = update_ui(&msg);
+  ChatMessage msg = {"Unknown", { 0 }};
 
+  bool send = update_ui(&msg);
   if (send) {
     send_chat(&msg);
   }
@@ -39,3 +45,31 @@ void loop(void) {
     update_chat_history();
   }
 }
+
+#else
+
+#include <cstring>
+#define THIS_PARTICIPANT_ID 1
+
+const char* ME = get_participant_name(THIS_PARTICIPANT_ID);
+
+void setup() {
+  Serial.begin(115200);
+  while (!Serial) delay(10);
+
+  int8_t transmit_power = 5;
+  setup_lora(transmit_power);
+}
+
+void loop(void) {
+  ChatMessage msg = {"Unknown", { 0 }};
+  strncpy(msg.author, ME, sizeof(msg.author) - 1);
+
+  int bytesRead = Serial.readBytesUntil('\n', msg.message, sizeof(msg.message) - 1);
+  if (bytesRead > 0) {
+    send_chat(&msg);
+  }
+
+  receive_chat(&msg);
+}
+#endif

@@ -159,8 +159,10 @@ bool box_intersect(TS_Point* p, uint16_t box_x, uint16_t box_y, uint16_t box_w, 
 // we will assign the calibration values on init
 int16_t min_x, max_x, min_y, max_y;
 
-void setup_ui() {
-  Serial.println("HX8357D Featherwing touch test!");
+void setup_ui(const char* this_participant) {
+  Serial.println("Initializing UI");
+
+  strncpy(current_msg.author, this_participant, LINE_WIDTH - 1);
 
 #if defined(_ADAFRUIT_STMPE610H_)
   if (!ts.begin()) {

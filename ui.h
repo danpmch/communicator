@@ -12,7 +12,7 @@ typedef struct {
 void copy_chat(ChatMessage* target, const ChatMessage* source);
 void record_chat(ChatMessage* msg);
 
-void setup_ui();
+void setup_ui(const char* this_participant);
 
 void update_chat_history();
 bool update_ui(ChatMessage* out);
