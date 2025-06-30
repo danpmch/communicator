@@ -1,8 +1,9 @@
 
 # Communicator
 
-This project contains the Arduino IDE project for an encrypted LoRa texting
-device. It's like a walkie talkie but for texting.
+This project contains the Arduino IDE project for an encrypted
+[LoRa](https://en.wikipedia.org/wiki/LoRa) texting device. It's like a walkie
+talkie but for texting.
 
 ## Hardware
 
