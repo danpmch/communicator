@@ -1,6 +1,7 @@
 
 #include "ui.h"
 #include "keyboard.h"
+#include "geometry.h"
 
 #include <Adafruit_GFX.h> // Core graphics library
 #include <Adafruit_HX8357.h>
@@ -78,15 +79,36 @@ Adafruit_TSC2007 ts = Adafruit_TSC2007();  // newer rev 2 touch contoller
 #define TSC_IRQ STMPE_CS
 
 // Size of the color selection boxes and the paintbrush size
-#define BOXSIZE 40
 #define PENRADIUS 3
-uint16_t oldcolor, currentcolor;
 
 #define TEXT_COLOR HX8357_RED
-#define TEXT_AREA_COLOR HX8357_BLUE
-#define TEXT_AREA_HEIGHT (TEXT_BUFFER_LINES * text_2_height)
-#define TEXT_AREA_Y (KEYBOARD_BASE - TEXT_AREA_HEIGHT)
-#define SEND_Y (TEXT_AREA_Y - KEY_WIDTH)
+
+typedef struct {
+  Box_2D obj;
+  uint16_t background_color;
+  Translation_2D location;
+} UI_Element;
+
+typedef struct {
+  const Keyboard::Keyboard* board;
+  Translation_2D location;
+} UI_Keyboard;
+
+UI_Element send_button;
+UI_Element text_area;
+UI_Element history_area;
+
+UI_Keyboard regular = {
+  .board = &Keyboard::regular,
+  .location = { .x = 10, .y = KEY_WIDTH * 12 }
+};
+
+UI_Keyboard numeric = {
+  .board = &Keyboard::numeric,
+  .location = { .x = 10, .y = KEY_WIDTH * 12 }
+};
+
+UI_Keyboard* current_keyboard = &regular;
 
 // At textSize(2) the screen fits 26 characters per line
 uint16_t text_2_width;
@@ -95,19 +117,15 @@ uint16_t text_2_height;
 ChatMessage current_msg = { "Me", { 0 } };
 int text_cursor = 0;
 
-void clear_text_area(Adafruit_HX8357* tft) {
-  tft->fillRect(0, TEXT_AREA_Y, tft->width(), TEXT_AREA_HEIGHT, TEXT_AREA_COLOR);
+void clear_area(Adafruit_HX8357* tft, UI_Element* area) {
+  tft->fillRect(area->location.x, area->location.y, area->obj.w, area->obj.h, area->background_color);
 }
 
-void clear_history_area(Adafruit_HX8357* tft) {
-  tft->fillRect(0, 0, tft->width(), SEND_Y, HX8357_GREEN);
-}
-
-void draw_send(Adafruit_HX8357* tft, int16_t y) {
-  tft->fillRect(0, y, tft->width(), KEY_WIDTH, KEY_COLOR);
-  tft->drawRect(0, y, tft->width(), KEY_WIDTH, KEY_BORDER_COLOR);
+void draw_send(Adafruit_HX8357* tft, UI_Element* send) {
+  tft->fillRect(send->location.x, send->location.y, send->obj.w, send->obj.h, send->background_color);
+  tft->drawRect(send->location.x, send->location.y, send->obj.w, send->obj.h, KEY_BORDER_COLOR);
   tft->setTextSize(KEY_TEXT_SIZE);
-  tft->setCursor(tft->width() / 3, y + KEY_WIDTH / 8);
+  tft->setCursor(send->location.x + send->obj.w / 3, send->location.y + send->obj.h / 8);
   tft->print("SEND");
 }
 
@@ -116,7 +134,7 @@ void draw_text_area_cursor(Adafruit_HX8357* tft, int cursor, uint color) {
   int col = cursor - row * LINE_WIDTH;
   tft->drawFastVLine(
     text_2_width * col,
-    TEXT_AREA_Y + text_2_height * row,
+    text_area.location.y + text_2_height * row,
     text_2_height,
     color
   );
@@ -129,10 +147,28 @@ void delete_text_buffer_index(Adafruit_HX8357* tft, int index) {
   Serial.printf("Computed bounds for %d (%d, %d): (%d, %d, %d, %d)\n", index, dirty_col, dirty_row, dirty_col * text_2_width, dirty_row * text_2_height, text_2_width, text_2_height);
   tft->fillRect(
     dirty_col * text_2_width,
-    TEXT_AREA_Y + dirty_row * text_2_height,
+    text_area.location.y + dirty_row * text_2_height,
     text_2_width,
     text_2_height,
-    TEXT_AREA_COLOR);
+    text_area.background_color
+  );
+}
+
+void draw_keyboard(Adafruit_HX8357* tft, UI_Keyboard* board) {
+  Serial.printf("Drawing %d keys:\n", board->board->total_keys);
+  tft->setTextColor(TEXT_COLOR);
+  tft->setTextSize(KEY_TEXT_SIZE);
+  for (int i = 0; i < board->board->total_keys; i++) {
+    Keyboard::Key k = board->board->keys[i];
+    Serial.printf("-> %c (%d, %d)\n", k.key, k.col, k.row);
+    TS_Point local_key_p = key_location(&k);
+    TS_Point key_p = translate(&local_key_p, &board->location);
+    tft->fillRect(key_p.x, key_p.y, KEY_WIDTH * k.u, KEY_WIDTH, KEY_COLOR);
+    tft->drawRect(key_p.x, key_p.y, KEY_WIDTH * k.u, KEY_WIDTH, KEY_BORDER_COLOR);
+    tft->setCursor(key_p.x + (KEY_WIDTH * k.u / 4), key_p.y + (KEY_WIDTH / 8));
+    tft->printf("%c", k.key);
+  }
+  Serial.println("Key drawing complete!");
 }
 
 #define CHAT_HISTORY_SIZE 6
@@ -148,12 +184,6 @@ void record_chat(ChatMessage* msg) {
   copy_chat(history + next_history, msg);
   next_history = (next_history + 1) % CHAT_HISTORY_SIZE;
   used_history_entries = min(CHAT_HISTORY_SIZE, used_history_entries + 1);
-}
-
-bool box_intersect(TS_Point* p, uint16_t box_x, uint16_t box_y, uint16_t box_w, uint16_t box_h) {
-  bool x_in_range = box_x <= p->x && p->x < box_x + box_w;
-  bool y_in_range = box_y <= p->y && p->y < box_y + box_h;
-  return x_in_range && y_in_range;
 }
 
 // we will assign the calibration values on init
@@ -200,30 +230,35 @@ void setup_ui(const char* this_participant) {
   // landscape with USB port at bottom
   tft.setRotation(2);
 
-  clear_text_area(&tft);
-  tft.setTextColor(TEXT_COLOR);
-  tft.setTextSize(KEY_TEXT_SIZE);
+  text_area = {
+    .obj = {.x = 0, .y = 0, .w = tft.width(), .h = TEXT_BUFFER_LINES * text_2_height },
+    .background_color = HX8357_BLUE,
+    .location = {.x = 0, .y = current_keyboard->location.y - TEXT_BUFFER_LINES * text_2_height }
+  };
 
-  Serial.printf("Drawing %d keys:\n", TOTAL_KEYS);
-  for (int i = 0; i < TOTAL_KEYS; i++) {
-    Key k = keys[i];
-    Serial.printf("-> %c (%d, %d)\n", k.key, k.col, k.row);
-    tft.fillRect(x_coord(k.col), y_coord(k.row), KEY_WIDTH * k.u, KEY_WIDTH, KEY_COLOR);
-    tft.drawRect(x_coord(k.col), y_coord(k.row), KEY_WIDTH * k.u, KEY_WIDTH, KEY_BORDER_COLOR);
-    tft.setCursor(x_coord(k.col) + (KEY_WIDTH * k.u / 4), y_coord(k.row) + (KEY_WIDTH / 8));
-    tft.printf("%c", k.key);
-  }
-  Serial.println("Key drawing complete!");
+  send_button = {
+    .obj = {.x = 0, .y = 0, .w = tft.width(), .h = KEY_WIDTH},
+    .background_color = KEY_COLOR,
+    .location = {.x = 0, .y = text_area.location.y - KEY_WIDTH}
+  };
 
-  draw_send(&tft, SEND_Y);
-  clear_history_area(&tft);
+  history_area = {
+    .obj = {.x = 0, .y = 0, .w = tft.width(), .h = send_button.location.y},
+    .background_color = HX8357_GREEN,
+    .location = {.x = 0, .y = 0}
+  };
+
+  clear_area(&tft, &text_area);
+  draw_keyboard(&tft, current_keyboard);
+  draw_send(&tft, &send_button);
+  clear_area(&tft, &history_area);
 }
 
 #define DEBOUNCE_DELAY_MS 200
 unsigned long last_keypress_ms = 0;
 
 void update_chat_history() {
-    clear_history_area(&tft);
+    clear_area(&tft, &history_area);
     int display_entry = CHAT_HISTORY_SIZE - 1;
     for (int msg = 0; msg < used_history_entries; msg++) {
       int msg_offset = next_history - 1 - msg;
@@ -284,25 +319,30 @@ bool update_ui(ChatMessage* out) {
   Serial.print(", ");
   Serial.println(p.y);
 
+  TS_Point keyboard_point = inverse_translate(&p, &current_keyboard->location);
+  const Keyboard::Key* k = Keyboard::check_keypress(&keyboard_point, current_keyboard->board);
+
   int dirty = -1;
-  for (int i = 0; i < TOTAL_KEYS; i++) {
-    Key k = keys[i];
-    bool x_in_range = x_coord(k.col) <= p.x && p.x < x_coord(k.col) + KEY_WIDTH * k.u;
-    bool y_in_range = y_coord(k.row) <= p.y && p.y < y_coord(k.row) + KEY_WIDTH;
-    if (x_in_range && y_in_range) {
-      Serial.printf("Pushed key %c\n", k.key);
-      if (k.key == '<') {
-        // backspace
-        text_cursor = max(0, text_cursor - 1);
-        dirty = text_cursor;
-      } else {
-        current_msg.message[text_cursor] = k.key;
-        text_cursor = min(TEXT_BUFFER_SIZE - 1, text_cursor + 1);
-      }
+  if (k != NULL) {
+    Serial.printf("Pushed key %c\n", k->key);
+    if (k->key == '<') {
+      // backspace
+      text_cursor = max(0, text_cursor - 1);
+      dirty = text_cursor;
+    } else if (k->key == '#' && current_keyboard == &regular) {
+      current_keyboard = &numeric;
+      draw_keyboard(&tft, current_keyboard);
+    } else if (k->key == 'A' && current_keyboard == &numeric) {
+      current_keyboard = &regular;
+      draw_keyboard(&tft, current_keyboard);
+    } else {
+      current_msg.message[text_cursor] = k->key;
+      text_cursor = min(TEXT_BUFFER_SIZE - 1, text_cursor + 1);
     }
   }
 
-  bool send_pushed = box_intersect(&p, 0, SEND_Y, tft.width(), KEY_WIDTH);
+  TS_Point translated_p = inverse_translate(&p, &send_button.location);
+  bool send_pushed = box_intersect(&translated_p, &send_button.obj);
   bool should_send_msg = send_pushed && text_cursor > 0;
   if (should_send_msg) {
     current_msg.message[text_cursor] = 0;
@@ -318,17 +358,17 @@ bool update_ui(ChatMessage* out) {
   current_msg.message[text_cursor] = 0;
   if (dirty != -1) {
     delete_text_buffer_index(&tft, dirty);
-    draw_text_area_cursor(&tft, dirty + 1, TEXT_AREA_COLOR);
+    draw_text_area_cursor(&tft, dirty + 1, text_area.background_color);
   }
   if (should_send_msg) {
-    clear_text_area(&tft);
+    clear_area(&tft, &text_area);
   }
   tft.setTextSize(2);
-  tft.setCursor(0, TEXT_AREA_Y);
+  tft.setCursor(0, text_area.location.y);
   tft.print(current_msg.message);
 
   // clear old cursor and draw new one
-  draw_text_area_cursor(&tft, max(0, text_cursor - 1), TEXT_AREA_COLOR);
+  draw_text_area_cursor(&tft, max(0, text_cursor - 1), text_area.background_color);
   draw_text_area_cursor(&tft, text_cursor, TEXT_COLOR);
 
   if (should_send_msg) {

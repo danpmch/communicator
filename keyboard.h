@@ -1,10 +1,14 @@
 #ifndef __KEYBOARD_H__
 #define __KEYBOARD_H__
 
+#include <Adafruit_TSC2007.h>
+
 #define KEY_WIDTH 30
 #define KEY_COLOR HX8357_WHITE
 #define KEY_BORDER_COLOR HX8357_MAGENTA
 #define KEY_TEXT_SIZE 3
+
+namespace Keyboard {
 
 typedef struct {
   char key;
@@ -16,15 +20,24 @@ typedef struct {
   int u;
 } Key;
 
-#define TOTAL_KEYS 32
+struct Keyboard {
+  const Key* keys;
+  const size_t total_keys;
+};
 
-#define KEYBOARD_BASE (KEY_WIDTH * 12)
-#define KEYBOARD_X_START 10
 #define KEYS(n) (KEY_WIDTH * n)
 
-extern const Key keys[];
+extern const Keyboard regular;
+extern const Keyboard numeric;
 
 int x_coord(int key_col);
 int y_coord(int key_row);
+TS_Point key_location(const Key* k);
 
+// Given a point in the keyboard's local reference frame, return
+// a pointer to the key at that point, or NULL.
+const Key* check_keypress(TS_Point* p, const Keyboard* board);
+
+
+}
 #endif

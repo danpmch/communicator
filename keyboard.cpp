@@ -1,7 +1,8 @@
 
 #include "keyboard.h"
+#include "geometry.h"
 
-const Key keys[] = {
+const Keyboard::Key regular_keys[] = {
   // row 0
   { .key = 'q', .col = 0, .row = 0, .u = 1 },
   { .key = 'w', .col = 1, .row = 0, .u = 1 },
@@ -39,15 +40,94 @@ const Key keys[] = {
   { .key = '?', .col = 9, .row = 2, .u = 1 },
 
   // row 3
-  { .key = ' ', .col = 0, .row = 3, .u = 8 },
+  { .key = '#', .col = 0, .row = 3, .u = 1 },
+  { .key = ' ', .col = 1, .row = 3, .u = 7 },
   { .key = '<', .col = 8, .row = 3, .u = 2 }
 };
+const size_t TOTAL_REGULAR_KEYS = sizeof(regular_keys) / sizeof(Keyboard::Key);
 
-int x_coord(int key_col) {
-  return KEYBOARD_X_START + KEY_WIDTH * key_col;
+const Keyboard::Keyboard Keyboard::regular = {
+  .keys = regular_keys,
+  .total_keys = TOTAL_REGULAR_KEYS
+};
+
+const Keyboard::Key numeric_keys[] = {
+  // row 0
+  { .key = '!', .col = 0, .row = 0, .u = 1 },
+  { .key = '@', .col = 1, .row = 0, .u = 1 },
+  { .key = '#', .col = 2, .row = 0, .u = 1 },
+  { .key = '$', .col = 3, .row = 0, .u = 1 },
+  { .key = '%', .col = 4, .row = 0, .u = 1 },
+  { .key = '^', .col = 5, .row = 0, .u = 1 },
+  { .key = '&', .col = 6, .row = 0, .u = 1 },
+  { .key = '*', .col = 7, .row = 0, .u = 1 },
+  { .key = '(', .col = 8, .row = 0, .u = 1 },
+  { .key = ')', .col = 9, .row = 0, .u = 1 },
+
+  // row 1
+  { .key = '1', .col = 0, .row = 1, .u = 1 },
+  { .key = '2', .col = 1, .row = 1, .u = 1 },
+  { .key = '3', .col = 2, .row = 1, .u = 1 },
+  { .key = '4', .col = 3, .row = 1, .u = 1 },
+  { .key = '5', .col = 4, .row = 1, .u = 1 },
+  { .key = '6', .col = 5, .row = 1, .u = 1 },
+  { .key = '7', .col = 6, .row = 1, .u = 1 },
+  { .key = '8', .col = 7, .row = 1, .u = 1 },
+  { .key = '9', .col = 8, .row = 1, .u = 1 },
+  { .key = '0', .col = 9, .row = 1, .u = 1 },
+
+  // row 2
+  { .key = '~', .col = 0, .row = 2, .u = 1 },
+  { .key = '`', .col = 1, .row = 2, .u = 1 },
+  { .key = '_', .col = 2, .row = 2, .u = 1 },
+  { .key = '-', .col = 3, .row = 2, .u = 1 },
+  { .key = '+', .col = 4, .row = 2, .u = 1 },
+  { .key = '=', .col = 5, .row = 2, .u = 1 },
+  { .key = '{', .col = 6, .row = 2, .u = 1 },
+  { .key = '}', .col = 7, .row = 2, .u = 1 },
+  { .key = '[', .col = 8, .row = 2, .u = 1 },
+  { .key = ']', .col = 9, .row = 2, .u = 1 },
+
+  // row 3
+  { .key = 'A', .col = 0, .row = 3, .u = 1 },
+  { .key = ' ', .col = 1, .row = 3, .u = 7 },
+  { .key = '<', .col = 8, .row = 3, .u = 2 }
+};
+const size_t TOTAL_NUMERIC_KEYS = sizeof(numeric_keys) / sizeof(Keyboard::Key);
+
+const Keyboard::Keyboard Keyboard::numeric = {
+  .keys = numeric_keys,
+  .total_keys = TOTAL_NUMERIC_KEYS
+};
+
+int Keyboard::x_coord(int key_col) {
+  return KEY_WIDTH * key_col;
 }
 
-int y_coord(int key_row) {
-  return KEYBOARD_BASE + KEYS(key_row);
+int Keyboard::y_coord(int key_row) {
+  return KEYS(key_row);
 }
+
+TS_Point Keyboard::key_location(const Key* k) {
+  return TS_Point(x_coord(k->col), y_coord(k->row), 0);
+}
+
+const Keyboard::Key* Keyboard::check_keypress(TS_Point* p, const Keyboard* board) {
+  for (int i = 0; i < board->total_keys; i++) {
+    const Key* k = board->keys + i;
+    TS_Point key_p = key_location(k);
+    Box_2D key_box = {
+      .x = key_p.x,
+      .y = key_p.y,
+      .w = KEY_WIDTH * k->u,
+      .h = KEY_WIDTH
+    };
+    if (box_intersect(p, &key_box)) {
+      return k;
+    }
+  }
+
+  return NULL;
+}
+
 
