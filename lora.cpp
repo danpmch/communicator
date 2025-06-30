@@ -91,6 +91,8 @@
 // Singleton instance of the radio driver
 RH_RF95 rf95(RFM95_CS, RFM95_INT);
 
+// TODO: read this from Serial on startup instead of 
+// hardcoding it
 #define KEY_SIZE 32
 uint8_t key[KEY_SIZE] = {
   0xa1, 0xc4, 0x63, 0xe1, 0xfe, 0xff, 0x26, 0x2d,
