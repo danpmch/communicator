@@ -91,13 +91,7 @@
 // Singleton instance of the radio driver
 RH_RF95 rf95(RFM95_CS, RFM95_INT);
 
-#define KEY_SIZE 32
-uint8_t key[KEY_SIZE] = {
-  0xa1, 0xc4, 0x63, 0xe1, 0xfe, 0xff, 0x26, 0x2d,
-  0x09, 0x13, 0xb0, 0x65, 0x30, 0x59, 0xb9, 0xae, 
-  0x5a, 0x86, 0xda, 0xa1, 0xfe, 0xf4, 0x83, 0x3a, 
-  0x20, 0x2f, 0xf0, 0x43, 0xb8, 0x6c, 0x29, 0x0c
-};
+const uint8_t* key;
 
 #define IV_SIZE 8
 #define AUTHOR_SIZE 1
@@ -129,10 +123,15 @@ void decrypt(uint8_t* msg, uint8_t* packet, uint8_t packet_len) {
   cipher.decrypt(msg, packet + IV_SIZE, packet_len - IV_SIZE);
 }
 
+void set_lora_cs_high() {
+  pinMode(RFM95_CS, OUTPUT);
+  digitalWrite(RFM95_CS, HIGH);
+}
+
 // The default transmitter power is 13dBm, using PA_BOOST.
 // If you are using RFM95/96/97/98 modules which uses the PA_BOOST transmitter pin, then
 // you can set transmitter powers from 5 to 23 dBm:
-void setup_lora(int transmit_power) {
+void setup_lora(int transmit_power, const uint8_t* encryption_key) {
   pinMode(LED_BUILTIN, OUTPUT);
   pinMode(RFM95_RST, OUTPUT);
   digitalWrite(RFM95_RST, HIGH);
@@ -144,7 +143,7 @@ void setup_lora(int transmit_power) {
 
   delay(100);
 
-  Serial.println("Feather LoRa TX Test!");
+  Serial.println("Initializing LoRa");
 
   // manual reset
   digitalWrite(RFM95_RST, LOW);
@@ -170,6 +169,8 @@ void setup_lora(int transmit_power) {
 
   Serial.printf("Set TX power to: %d\n", transmit_power);
   rf95.setTxPower(transmit_power, false);
+
+  key = encryption_key;
 }
 
 void send(uint8_t* radiopacket, uint8_t packet_size) {

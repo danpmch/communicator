@@ -16,18 +16,35 @@
 #include "ui.h"
 #include "lora.h"
 #include "participants.h"
+#include "sd.h"
 
 #define ENABLE_UI
 #ifdef ENABLE_UI
 
 #define THIS_PARTICIPANT_ID 0
 
+uint8_t encryption_key[KEY_SIZE] = { 0 };
+
 void setup() {
   Serial.begin(115200);
   while (!Serial) delay(10);
 
+  // Need to disable the lora chip before accessing SD because they
+  // interfere with each other.
+  set_lora_cs_high();
+  setup_sd();
+  if (read_bytes("RandomNumbers", encryption_key, KEY_SIZE) <= 0) {
+    Serial.println("Could not read secret key, cannot send messages!");
+  } else {
+    Serial.print("Key: ");
+    for (int i = 0; i < KEY_SIZE; i++) {
+      Serial.printf("%02x ", encryption_key[i]);
+    }
+    Serial.println("");
+  }
+
   int8_t transmit_power = 5;
-  setup_lora(transmit_power);
+  setup_lora(transmit_power, encryption_key);
   setup_ui(get_participant_name(THIS_PARTICIPANT_ID));
 }
 
@@ -55,7 +72,7 @@ const char* ME = get_participant_name(THIS_PARTICIPANT_ID);
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial) delay(10);
+  //while (!Serial) delay(10);
 
   int8_t transmit_power = 5;
   setup_lora(transmit_power);
