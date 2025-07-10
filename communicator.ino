@@ -22,17 +22,19 @@
 #ifdef ENABLE_UI
 
 #define THIS_PARTICIPANT_ID 0
-
-uint8_t encryption_key[KEY_SIZE] = { 0 };
+//#define ENCRYPTION
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial) delay(10);
+  //while (!Serial) delay(10);
 
   // Need to disable the lora chip before accessing SD because they
   // interfere with each other.
   set_lora_cs_high();
   setup_sd();
+
+#ifdef ENCRYPTION
+  uint8_t encryption_key[KEY_SIZE] = { 0 };
   if (read_bytes("RandomNumbers", encryption_key, KEY_SIZE) <= 0) {
     Serial.println("Could not read secret key, cannot send messages!");
   } else {
@@ -43,8 +45,14 @@ void setup() {
     Serial.println("");
   }
 
+  ChaCha20Encryptor* encryptor = new ChaCha20Encryptor(encryption_key);
+#else
+  //PassthruEncryptor* encryptor = new PassthruEncryptor();
+  ChaCha20Encryptor* encryptor = new TestChaCha20Encryptor();
+#endif
+
   int8_t transmit_power = 5;
-  setup_lora(transmit_power, encryption_key);
+  setup_lora(transmit_power, encryptor);
   setup_ui(get_participant_name(THIS_PARTICIPANT_ID));
 }
 
@@ -75,7 +83,7 @@ void setup() {
   //while (!Serial) delay(10);
 
   int8_t transmit_power = 5;
-  setup_lora(transmit_power);
+  setup_lora(transmit_power, new TestChaCha20Encryptor());
 }
 
 void loop(void) {

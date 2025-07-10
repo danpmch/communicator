@@ -11,8 +11,6 @@
 #include <SPI.h>
 #include <RH_RF95.h>
 
-// TODO: figure out if better random numbers are needed
-#include <ChaCha.h>
 
 // First 3 here are boards w/radio BUILT-IN. Boards using FeatherWing follow.
 #if defined (__AVR_ATmega32U4__)  // Feather 32u4 w/Radio
@@ -91,37 +89,12 @@
 // Singleton instance of the radio driver
 RH_RF95 rf95(RFM95_CS, RFM95_INT);
 
-const uint8_t* key;
+Encryptor* encryptor;
 
-#define IV_SIZE 8
 #define AUTHOR_SIZE 1
 #define PAYLOAD_SIZE (AUTHOR_SIZE + TEXT_BUFFER_SIZE)
-#define MY_PACKET_SIZE (IV_SIZE + PAYLOAD_SIZE)
 
-void new_iv(uint8_t* buf) {
-  for(int i = 0; i < IV_SIZE; i++) {
-    buf[i] = random(256);
-  }
-}
-
-// creates an encrypted packet by generating a new nonce, encrypting the message,
-// and storing the nonce followed by the encrypted message in the output packet.
-void encrypt(uint8_t* packet, uint8_t* msg, uint8_t msg_len) {
-  new_iv(packet);
-  ChaCha cipher = ChaCha(20);
-  cipher.setKey(key, KEY_SIZE);
-  cipher.setIV(packet, IV_SIZE);
-  cipher.encrypt(packet + IV_SIZE, msg, msg_len);
-}
-
-// decrypt the message from the packet and store in msg, assuming the first
-// IV_SIZE bytes of the packet are the nonce
-void decrypt(uint8_t* msg, uint8_t* packet, uint8_t packet_len) {
-  ChaCha cipher = ChaCha(20);
-  cipher.setKey(key, KEY_SIZE);
-  cipher.setIV(packet, IV_SIZE);
-  cipher.decrypt(msg, packet + IV_SIZE, packet_len - IV_SIZE);
-}
+size_t my_packet_size() { return encryptor->header_size() + PAYLOAD_SIZE; }
 
 void set_lora_cs_high() {
   pinMode(RFM95_CS, OUTPUT);
@@ -131,7 +104,7 @@ void set_lora_cs_high() {
 // The default transmitter power is 13dBm, using PA_BOOST.
 // If you are using RFM95/96/97/98 modules which uses the PA_BOOST transmitter pin, then
 // you can set transmitter powers from 5 to 23 dBm:
-void setup_lora(int transmit_power, const uint8_t* encryption_key) {
+void setup_lora(int transmit_power, Encryptor* _encryptor) {
   pinMode(LED_BUILTIN, OUTPUT);
   pinMode(RFM95_RST, OUTPUT);
   digitalWrite(RFM95_RST, HIGH);
@@ -170,7 +143,7 @@ void setup_lora(int transmit_power, const uint8_t* encryption_key) {
   Serial.printf("Set TX power to: %d\n", transmit_power);
   rf95.setTxPower(transmit_power, false);
 
-  key = encryption_key;
+  encryptor = _encryptor;
 }
 
 void send(uint8_t* radiopacket, uint8_t packet_size) {
@@ -211,10 +184,10 @@ void send_chat(ChatMessage* msg) {
     payload[0] = author_id;
     strcpy((char*) payload + AUTHOR_SIZE, msg->message);
 
-    uint8_t encrypted[MY_PACKET_SIZE] = { 0 };
-    encrypt(encrypted, payload, msg_len + AUTHOR_SIZE);
+    uint8_t encrypted[my_packet_size()] = { 0 };
+    encryptor->encrypt(encrypted, payload, msg_len + AUTHOR_SIZE);
     Serial.printf("Sending: %s: '%s' '%s' ...", msg->author, msg->message, encrypted);
-    send(encrypted, IV_SIZE + AUTHOR_SIZE + msg_len + 1);
+    send(encrypted, encryptor->header_size() + AUTHOR_SIZE + msg_len + 1);
     Serial.println("Done");
 }
 
@@ -227,7 +200,7 @@ bool receive_chat(ChatMessage* msg) {
   }
 
   uint8_t decrypted[RH_RF95_MAX_MESSAGE_LEN] = { 0 };
-  decrypt(decrypted, encrypted, msg_len - 1);
+  encryptor->decrypt(decrypted, encrypted, msg_len - 1);
 
   uint8_t author_id = decrypted[0];
   const char* author = get_participant_name(author_id);
@@ -245,29 +218,3 @@ bool receive_chat(ChatMessage* msg) {
   return true;
 }
 
-void lora_loop() {
-  delay(1000); // Wait 1 second between transmits, could also 'sleep' here!
-
-  //Serial.println("Reading message from serial...");
-  char radiopacket[PAYLOAD_SIZE] = { 0 };
-  int bytesRead = Serial.readBytesUntil('\n', radiopacket, PAYLOAD_SIZE - 1);
-
-  if (bytesRead > 0) {
-    uint8_t encrypted[MY_PACKET_SIZE] = { 0 };
-    encrypt(encrypted, (uint8_t*) radiopacket, bytesRead);
-
-    Serial.printf("Sending: '%s' '%s' ...", radiopacket, encrypted);
-    send(encrypted, bytesRead + IV_SIZE + 1);
-    Serial.println("Done");
-  }
-  
-    // Now wait for a reply
-  uint8_t encrypted[RH_RF95_MAX_MESSAGE_LEN];
-  uint8_t msg_len = receive(encrypted, sizeof(encrypted));
-  if (msg_len > 0) {
-    uint8_t decrypted[RH_RF95_MAX_MESSAGE_LEN] = { 0 };
-    decrypt(decrypted, encrypted, msg_len - 1);
-    Serial.printf("> '%s'\n", (char*) decrypted);
-  }
-
-}
